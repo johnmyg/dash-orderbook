@@ -1,0 +1,130 @@
+from dash import Dash, html, dcc, Input, Output, dash_table
+import dash_bootstrap_components as dbc
+import plotly.graph_objects as go
+from decimal import Decimal
+import pandas as pd
+import requests 
+import math
+
+app = Dash(external_stylesheets=[dbc.themes.CYBORG])
+
+def dropdown_option(title, options, default_value,_id):
+    return html.Div(children=[
+        html.H2(title),
+        dcc.Dropdown(options = options, value = default_value, id= _id)
+        ])
+
+app.layout = html.Div(children= [
+
+    html.Div(children = [
+        html.Div(children = [
+            dash_table.DataTable(id = "ask_table"),
+            html.H2(id="mid_price"),
+            dash_table.DataTable(id = "bid_table"),
+            ], style = {"width":"300px"}),
+
+        html.Div(children = [
+            dropdown_option("Aggregate Level",
+                options = ["0.01","0.1","1","10","100"],
+                default_value = "0.01",_id="aggregation-level"),
+            dropdown_option("Pair",
+                options = ["BTCUSDT","ETHUSDT","SOLUSDT"],
+                default_value = "ETHUSDT",_id="pair-select"),  
+            dropdown_option("Quantity Precision",
+                        options = ["0","1","2","3","4"],
+                        default_value = "2", _id = "quantity-precision"), 
+            dropdown_option("Price Precision",
+                        options = ["0","1","2","3","4"],
+                        default_value = "2", _id = "price-precision"), 
+            ],style = {"padding-left": "75px"}),      
+        ],style = {"display" : "flex", 
+                   "justify-content" : "center",
+                   "align-items":"center",
+                   "height": "100vh",}),
+
+    dcc.Interval(id="timer",interval = 3000)
+    ])
+
+def aggregate_levels(levels_df, agg_level= Decimal('1'), side = "bid"):
+
+    if side == "bid":
+        right = False
+        label_func = lambda x: x.left
+    else:
+        right = True;
+        label_func = lambda x: x.right
+
+
+    min_level = math.floor(Decimal(min(levels_df.price))/agg_level-1)*agg_level
+    max_level = math.ceil(Decimal(max(levels_df.price))/agg_level+1)*agg_level
+
+    level_bounds = [float(min_level + agg_level*x) for x in range(int((max_level - min_level)/agg_level)+1)]
+
+    levels_df["bin"] = pd.cut(levels_df.price , bins = level_bounds, precision= 10, right = right )
+
+    levels_df = levels_df.groupby("bin").agg(quantity = ("quantity","sum")).reset_index()
+
+    levels_df["price"] = levels_df.bin.apply(label_func)
+    levels_df = levels_df[levels_df.quantity>0]
+    levels_df = levels_df[["price","quantity"]]
+
+    return levels_df
+
+
+@app.callback(
+    Output("bid_table","data"),
+    Output("ask_table","data"),
+    Output("mid_price","children"),
+    Input("aggregation-level","value"),
+    Input("quantity-precision","value"),
+    Input("price-precision","value"),
+    Input("pair-select","value"),
+    Input("timer", "n_intervals"),
+    )
+
+def update_orderbook(agg_level,quantity_precision,price_precision,symbol,n_intervals):
+    
+    url = " https://api.binance.us/api/v3/depth"
+
+    levels_to_show = 10
+
+    params = {
+        "symbol" : symbol.upper(),
+        "limit" : 1000,
+        }
+    
+    data = requests.get(url,params=params).json()
+    
+    bid_df = pd.DataFrame(data["bids"],columns=["price","quantity"],dtype = float)
+    ask_df = pd.DataFrame(data["asks"],columns=["price","quantity"],dtype = float)
+
+    bid_df = aggregate_levels(bid_df,agg_level=Decimal(agg_level),side="bid")
+    bid_df = bid_df.sort_values("price",ascending=False)
+    
+    ask_df = aggregate_levels(ask_df,agg_level=Decimal(agg_level),side="ask")
+    ask_df = ask_df.sort_values("price",ascending=False)
+    
+    mid_price = (bid_df.price.iloc[0] + ask_df.price.iloc[-1])/2
+    mid_price = f"%.{quantity_precision}f" % mid_price
+
+    bid_df = bid_df.iloc[:levels_to_show]
+    ask_df = ask_df.iloc[-levels_to_show:]
+
+    bid_df.quantity = bid_df.quantity.apply(
+        lambda x: f"%.{quantity_precision}f" % x)
+
+    ask_df.quantity = ask_df.quantity.apply(
+        lambda x: f"%.{quantity_precision}f" % x)
+
+
+    bid_df.price = bid_df.price.apply(
+        lambda x: f"%.{price_precision}f" % x)
+
+    ask_df.price = ask_df.price.apply(
+        lambda x: f"%.{price_precision}f" % x)
+
+    
+    return bid_df.to_dict("records"), ask_df.to_dict("records"),mid_price
+
+if __name__ == "__main__":
+    app.run_server(debug=True)
