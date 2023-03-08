@@ -18,9 +18,14 @@ app.layout = html.Div(children= [
 
     html.Div(children = [
         html.Div(children = [
-            dash_table.DataTable(id = "ask_table"),
-            html.H2(id="mid_price"),
-            dash_table.DataTable(id = "bid_table"),
+            dash_table.DataTable(id = "ask_table",style_header={"display":"none"},
+                        style_cell = {"mindWidth":"140","maxWidth":"140px","width":"140px","text-align" : "center"}),
+
+            html.H2(id="mid_price",style = {"padding-top":"40px","text-align" : "center"}),
+
+            dash_table.DataTable(id = "bid_table",style_header= {"display":"none"},
+                        style_cell = {"mindWidth":"140","maxWidth":"140px","width":"140px","text-align" : "center"}),
+
             ], style = {"width":"300px"}),
 
         html.Div(children = [
@@ -36,7 +41,8 @@ app.layout = html.Div(children= [
             dropdown_option("Price Precision",
                         options = ["0","1","2","3","4"],
                         default_value = "2", _id = "price-precision"), 
-            ],style = {"padding-left": "75px"}),      
+            ],style = {"padding-left": "75px"}),     
+
         ],style = {"display" : "flex", 
                    "justify-content" : "center",
                    "align-items":"center",
@@ -44,6 +50,25 @@ app.layout = html.Div(children= [
 
     dcc.Interval(id="timer",interval = 3000)
     ])
+
+def table_styling(df,side):
+
+    if side == "ask":
+        bar_color = "rgba(230,31,7,0.2)"
+        font_color = "rgb(230,31,7)"
+    elif side == "bid":
+        bar_color = "rgb(13,230,49,0.2)"
+        font_color = "rgb(13,230,49)"
+    cell_bg_color = "#060606"
+    styles = []
+
+    styles.append({
+        "if": {"column_id":"price"},
+        "color": font_color,
+        "background-color": cell_bg_color,
+    })
+
+    return styles
 
 def aggregate_levels(levels_df, agg_level= Decimal('1'), side = "bid"):
 
@@ -73,7 +98,9 @@ def aggregate_levels(levels_df, agg_level= Decimal('1'), side = "bid"):
 
 @app.callback(
     Output("bid_table","data"),
+    Output("bid_table","style_data_conditional"),
     Output("ask_table","data"),
+    Output("ask_table","style_data_conditional"),
     Output("mid_price","children"),
     Input("aggregation-level","value"),
     Input("quantity-precision","value"),
@@ -124,7 +151,8 @@ def update_orderbook(agg_level,quantity_precision,price_precision,symbol,n_inter
         lambda x: f"%.{price_precision}f" % x)
 
     
-    return bid_df.to_dict("records"), ask_df.to_dict("records"),mid_price
+    return (bid_df.to_dict("records"), table_styling(bid_df,"bid"),
+        ask_df.to_dict("records"),table_styling(ask_df,"ask"),mid_price)
 
 if __name__ == "__main__":
     app.run_server(debug=True)
